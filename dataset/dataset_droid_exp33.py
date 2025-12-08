@@ -51,7 +51,9 @@ class Dataset_mix(Dataset):
             data_json_path = f'{dataset_meta_info_path}/{dataset_cfg}/{mode}_sample.json'
      
             with open(data_json_path, "r") as f:
-                samples = json.load(f)
+                data = json.load(f)
+                # 兼容两种格式：{'samples': [...]} 或直接 [...]
+                samples = data['samples'] if isinstance(data, dict) and 'samples' in data else data
             dataset_path = [os.path.join(dataset_root_path, dataset_name) for sample in samples]
             print(f"ALL dataset, {len(samples)} samples in total")
             self.dataset_path_all.append(dataset_path)
@@ -59,7 +61,7 @@ class Dataset_mix(Dataset):
             self.samples_len.append(len(samples))
 
             # prepare normalization
-            with open(f'{dataset_meta_info_path}/{dataset_name}/stat.json', "r") as f:
+            with open(f'{dataset_meta_info_path}/{dataset_cfg}/stat.json', "r") as f:
                 data_stat = json.load(f)
                 state_p01 = np.array(data_stat['state_01'])[None,:]
                 state_p99 = np.array(data_stat['state_99'])[None,:]
@@ -179,7 +181,9 @@ class Dataset_mix(Dataset):
         cond_cam_id3 = 2
         latnt_cond1,_ = self._get_obs(label, rgb_id, cond_cam_id1, pre_encode=True, video_dir=dataset_dir)
         latnt_cond2,_ = self._get_obs(label, rgb_id, cond_cam_id2, pre_encode=True, video_dir=dataset_dir)
-        latnt_cond3,_ = self._get_obs(label, rgb_id, cond_cam_id3, pre_encode=True, video_dir=dataset_dir)
+        # Flexiv只有2个视角，第3个视角复用第2个
+        latnt_cond3 = latnt_cond2
+        
         latent = torch.zeros((self.args.num_frames+self.args.num_history, 4, 72, 40), dtype=torch.float32)
         latent[:,:,0:24] =  latnt_cond1
         latent[:,:,24:48] = latnt_cond2

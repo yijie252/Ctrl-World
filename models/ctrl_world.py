@@ -119,7 +119,9 @@ class CrtlWorld(nn.Module):
         print("replace the unet to support action condition and frame_level pose!")
         unet = UNetSpatioTemporalConditionModel()
         unet.load_state_dict(self.pipeline.unet.state_dict(), strict=False)
-        self.pipeline.unet = unet
+        
+        # 重新注册自定义UNet到pipeline (确保类型正确)
+        self.pipeline.register_modules(unet=unet)
         
         self.unet = self.pipeline.unet
         self.vae = self.pipeline.vae
@@ -131,6 +133,10 @@ class CrtlWorld(nn.Module):
         self.image_encoder.requires_grad_(False)
         self.unet.requires_grad_(True)
         self.unet.enable_gradient_checkpointing()
+        
+        # 验证UNet类型
+        print(f"✅ UNet type: {type(self.unet)}")
+        print(f"✅ UNet module: {self.unet.__class__.__module__}")
 
         # SVD is a img2video model, load a clip text encoder
         from transformers import AutoTokenizer, CLIPTextModelWithProjection

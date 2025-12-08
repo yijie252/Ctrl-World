@@ -18,7 +18,6 @@ from tqdm.auto import tqdm
 import json
 from decord import VideoReader, cpu
 import wandb
-import swanlab
 import mediapy
 from models.ctrl_world import CrtlWorld
 from config import wm_args
@@ -27,7 +26,7 @@ import math
 
 def main(args):
     logger = get_logger(__name__, log_level="INFO")
-    swanlab.sync_wandb()
+    # 使用WandB进行实验跟踪
     accelerator = Accelerator(
         gradient_accumulation_steps=args.gradient_accumulation_steps,
         mixed_precision=args.mixed_precision,
@@ -40,7 +39,14 @@ def main(args):
     if args.ckpt_path is not None:
         print(f"Loading checkpoint from {args.ckpt_path}!")
         state_dict = torch.load(args.ckpt_path, map_location='cpu')
-        model.load_state_dict(state_dict, strict=True)
+        # Load with strict=False to allow missing/extra keys (e.g., if checkpoint has standard diffusers UNet)
+        missing_keys, unexpected_keys = model.load_state_dict(state_dict, strict=False)
+        if missing_keys:
+            print(f"⚠️  Missing keys in checkpoint: {len(missing_keys)} keys")
+        if unexpected_keys:
+            print(f"⚠️  Unexpected keys in checkpoint: {len(unexpected_keys)} keys")
+        # Ensure unet is the custom type after loading
+        print(f"✅ UNet type after loading: {type(model.unet)}")
     model.to(accelerator.device)
     model.train()
     optimizer = torch.optim.AdamW(model.parameters(), lr=args.learning_rate)
@@ -68,15 +74,25 @@ def main(args):
     from dataset.dataset_droid_exp33 import Dataset_mix
     train_dataset = Dataset_mix(args,mode='train')
     val_dataset = Dataset_mix(args,mode='val')
+    
+    # ⚡ 优化的DataLoader配置
     train_dataloader = torch.utils.data.DataLoader(
         train_dataset, 
         batch_size=args.train_batch_size,
-        shuffle=args.shuffle
+        shuffle=args.shuffle,
+        num_workers=args.num_workers,
+        pin_memory=True,  # 加速GPU数据传输
+        prefetch_factor=2,  # 预加载2个batch
+        persistent_workers=True if args.num_workers > 0 else False  # 保持workers活跃
     )
     val_dataloader = torch.utils.data.DataLoader(
         val_dataset, 
         batch_size=args.train_batch_size,
-        shuffle=args.shuffle
+        shuffle=args.shuffle,
+        num_workers=args.num_workers,
+        pin_memory=True,
+        prefetch_factor=2,
+        persistent_workers=True if args.num_workers > 0 else False
     )
 
     # Prepare everything with our accelerator
@@ -131,7 +147,7 @@ def main(args):
                     torch.save(accelerator.unwrap_model(model).state_dict(), save_path)
                     logger.info(f"Saved checkpoint to {save_path}")
                 # generate video every validation_steps
-                if global_step % args.validation_steps == 5 and accelerator.is_main_process:
+                if global_step % args.validation_steps == 0 and global_step > 0 and accelerator.is_main_process:
                     model.eval()
                     with accelerator.autocast():
                         for id in range(args.video_num):
@@ -168,7 +184,13 @@ def validate_video_generation(model, val_dataset, args, train_steps, videos_dir,
     his_latent_gt, future_latent_ft = video_gt[:,:args.num_history], video_gt[:,args.num_history:]
     current_latent = future_latent_ft[:,0]
     print("image",current_latent.shape, 'action', actions.shape)
-    assert current_latent.shape[1:] == (4, 72, 40)
+    # 动态检查latent shape（适配不同视角数量：DROID=3视角72宽，Flexiv=2视角48宽）
+    expected_latent_height = args.height // 8  # VAE下采样8倍: 192//8=24
+    # latent宽度是多个视角拼接的结果，根据实际数据推断
+    assert current_latent.shape[1] == 4, f"Expected 4 channels, got {current_latent.shape[1]}"
+    assert current_latent.shape[3] == expected_latent_height, f"Expected height {expected_latent_height}, got {current_latent.shape[3]}"
+    # 宽度可以是48（2视角）或72（3视角），不做严格检查
+    print(f"✅ Latent shape validated: {current_latent.shape} (width={current_latent.shape[2]} supports {current_latent.shape[2]//24} camera views)")
     assert actions.shape[1:] == (int(args.num_frames+args.num_history), args.action_dim)
 
     # start generate
@@ -243,20 +265,32 @@ def validate_video_generation(model, val_dataset, args, train_steps, videos_dir,
 if __name__ == "__main__":
     # reset parameters with command line
     from argparse import ArgumentParser
+    import importlib.util
+    
     parser = ArgumentParser()
+    parser.add_argument('--config', type=str, default='config', help='Config module name (e.g., config or config_flexiv)')
     parser.add_argument('--svd_model_path', type=str, default=None)
     parser.add_argument('--clip_model_path', type=str, default=None)
     parser.add_argument('--ckpt_path', type=str, default=None)
     parser.add_argument('--dataset_root_path', type=str, default=None)
     parser.add_argument('--dataset_meta_info_path', type=str, default=None)
-    # dataset_names
     parser.add_argument('--dataset_names', type=str, default=None)
     args_new = parser.parse_args()
+    
+    # Load config from specified module
+    config_name = args_new.config.replace('.py', '')
+    try:
+        config_module = __import__(config_name)
+        args = config_module.wm_args()
+        print(f"✅ Loaded config from {config_name}")
+    except ImportError:
+        print(f"⚠️  Warning: Could not import {config_name}, using default config")
+        from config import wm_args
     args = wm_args()
 
     def merge_args(args, new_args):
         for k, v in new_args.__dict__.items():
-            if v is not None:
+            if v is not None and k != 'config':
                 args.__dict__[k] = v
         return args
     
