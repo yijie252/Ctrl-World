@@ -184,13 +184,15 @@ def validate_video_generation(model, val_dataset, args, train_steps, videos_dir,
     his_latent_gt, future_latent_ft = video_gt[:,:args.num_history], video_gt[:,args.num_history:]
     current_latent = future_latent_ft[:,0]
     print("image",current_latent.shape, 'action', actions.shape)
-    # 动态检查latent shape（适配不同视角数量：DROID=3视角72宽，Flexiv=2视角48宽）
-    expected_latent_height = args.height // 8  # VAE下采样8倍: 192//8=24
-    # latent宽度是多个视角拼接的结果，根据实际数据推断
+    # 动态检查latent shape: (B, C, H, W)
+    # H是多视角堆叠的高度 (3视角=72, 2视角=48)
+    # W是单视角宽度 (320//8=40)
     assert current_latent.shape[1] == 4, f"Expected 4 channels, got {current_latent.shape[1]}"
-    assert current_latent.shape[3] == expected_latent_height, f"Expected height {expected_latent_height}, got {current_latent.shape[3]}"
-    # 宽度可以是48（2视角）或72（3视角），不做严格检查
-    print(f"✅ Latent shape validated: {current_latent.shape} (width={current_latent.shape[2]} supports {current_latent.shape[2]//24} camera views)")
+    expected_latent_width = args.width // 8  # VAE下采样8倍: 320//8=40
+    assert current_latent.shape[3] == expected_latent_width, f"Expected width {expected_latent_width}, got {current_latent.shape[3]}"
+    # 高度可以是48（2视角）或72（3视角）
+    num_views = current_latent.shape[2] // 24
+    print(f"✅ Latent shape validated: {current_latent.shape} (height={current_latent.shape[2]} = {num_views} views × 24)")
     assert actions.shape[1:] == (int(args.num_frames+args.num_history), args.action_dim)
 
     # start generate

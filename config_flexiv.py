@@ -15,7 +15,7 @@ class wm_args:
     # model paths (A100机器本地路径)
     svd_model_path = "/workspace/chenyj36@xiaopeng.com/models/stable-video-diffusion-img2vid"
     clip_model_path = "/workspace/chenyj36@xiaopeng.com/models/clip-vit-base-patch32"
-    ckpt_path = '/workspace/chenyj36@xiaopeng.com/models/checkpoint-10000.pt'  # 从DROID预训练模型微调
+    ckpt_path = '/workspace/chenyj36@xiaopeng.com/Ctrl-World/model_ckpt/flexiv_finetune/checkpoint-20000.pt'  # 从DROID预训练模型微调
     pi_ckpt = None  # 不需要policy checkpoint
 
     # dataset parameters - Flexiv数据集
@@ -45,7 +45,7 @@ class wm_args:
     num_train_epochs = 1000  # 数据少，多训练
     max_train_steps = 100000  # 🔥 10万步充分训练
     checkpointing_steps = 10000  # 🔥 每1万步保存（共10个checkpoint）
-    validation_steps = 25000  # 🔥 每2.5万步验证（共4次）
+    validation_steps = 100000  # 🔥 每2.5万步验证（共4次）
     max_grad_norm = 1.0
     
     # validation - ✨ A100可以做验证
